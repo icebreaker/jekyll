@@ -50,7 +50,9 @@ module Jekyll
       'png_engine' => 'blahtex',
       'png_dir'    => 'images/latex',
       'png_url'    => '/images/latex'
-    }
+    },
+
+	'url'		   => 'localhost'
   }
 
   # Generate a Jekyll configuration Hash by merging the default options

@@ -62,10 +62,16 @@ opts = OptionParser.new do |opts|
     end
   end
 
+  # This is useful if you don't want to hardcode the actual URL (i.e in atom.xml, google search)
+  opts.on("--url [URL]", "Site base url (default is localhost)") do |url|
+	options['url'] = url unless url.nil?
+  end
+
   opts.on("--version", "Display current version") do
     puts "Jekyll " + Jekyll.version
     exit 0
   end
+
 end
 
 # Read command line options into `options` hash

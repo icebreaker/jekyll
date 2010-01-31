@@ -1,6 +1,7 @@
 require 'rake'
 require 'rake/testtask'
 require 'rake/rdoctask'
+require 'rubygems'
 
 begin
   gem 'jeweler', '>= 0.11.0'

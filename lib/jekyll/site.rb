@@ -223,6 +223,19 @@ module Jekyll
       return hash
     end
 
+	# Constructs an array of Posts indexed by the specified Post attribute
+	#
+	# Returns {post_attr => [{"posts"=><Post>,"name"=><Name>,"count"=><count>}]}
+	def post_attr_arry(post_attr)
+	  # Build a array based on the specified post attribute ( post attr => name,number of posts,array of posts )
+      # then sort each array in reverse order
+	  arry = []
+	  post_attr_hash(post_attr).each do |tag, posts|
+		arry << {"name"=>tag,"posts"=>posts,"count"=>posts.length}
+	  end
+	  return arry.sort! { |a, b| a['name'] <=> b['name'] }
+	end
+
     # The Hash payload containing site-wide data
     #
     # Returns {"site" => {"time" => <Time>,
@@ -233,6 +246,7 @@ module Jekyll
           "time"       => Time.now,
           "posts"      => self.posts.sort { |a,b| b <=> a },
           "categories" => post_attr_hash('categories'),
+		  "_tags"	   => post_attr_arry('tags'),
           "tags"       => post_attr_hash('tags')})}
     end
 
