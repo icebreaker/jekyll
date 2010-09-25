@@ -124,9 +124,12 @@ module Jekyll
         "month"      => date.strftime("%m"),
         "day"        => date.strftime("%d"),
         "title"      => CGI.escape(slug),
-        "categories" => categories.join('/')
+        "i_day"      => date.strftime("%d").to_i.to_s,
+        "i_month"    => date.strftime("%m").to_i.to_s,
+        "categories" => categories.join('/'),
+        "output_ext" => self.output_ext
       }.inject(template) { |result, token|
-        result.gsub(/:#{token.first}/, token.last)
+        result.gsub(/:#{Regexp.escape token.first}/, token.last)
       }.gsub(/\/\//, "/")
     end
 
@@ -167,12 +170,10 @@ module Jekyll
     # Returns nothing
     def render(layouts, site_payload)
       # construct payload
-      payload =
-      {
+      payload = {
         "site" => { "related_posts" => related_posts(site_payload["site"]["posts"]) },
         "page" => self.to_liquid
-      }
-      payload = payload.deep_merge(site_payload)
+      }.deep_merge(site_payload)
 
       do_layout(payload, layouts)
     end
@@ -201,7 +202,8 @@ module Jekyll
     #
     # Returns <Hash>
     def to_liquid
-      { "title"      => self.data["title"] || self.slug.split('-').select {|w| w.capitalize! || w }.join(' '),
+      self.data.deep_merge({
+        "title"      => self.data["title"] || self.slug.split('-').select {|w| w.capitalize! || w }.join(' '),
         "url"        => self.url,
         "date"       => self.date,
         "id"         => self.id,
@@ -209,7 +211,7 @@ module Jekyll
         "next"       => self.next,
         "previous"   => self.previous,
         "tags"       => self.tags,
-        "content"    => self.content }.deep_merge(self.data)
+        "content"    => self.content })
     end
 
     def inspect

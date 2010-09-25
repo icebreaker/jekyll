@@ -1,8 +1,10 @@
 module Jekyll
 
   class Site
-    attr_accessor :config, :layouts, :posts, :pages, :static_files, :categories, :exclude,
-                  :source, :dest, :lsi, :pygments, :permalink_style, :tags
+    attr_accessor :config, :layouts, :posts, :pages, :static_files,
+                  :categories, :exclude, :source, :dest, :lsi, :pygments,
+                  :permalink_style, :tags, :time, :future, :safe, :plugins
+    attr_accessor :converters, :generators
 
     # Initialize the site
     #   +config+ is a Hash containing site configurations details
@@ -11,18 +13,26 @@ module Jekyll
     def initialize(config)
       self.config          = config.clone
 
+      self.safe            = config['safe']
       self.source          = File.expand_path(config['source'])
-      self.dest            = config['destination']
+      self.dest            = File.expand_path(config['destination'])
+      self.plugins         = File.expand_path(config['plugins'])
       self.lsi             = config['lsi']
       self.pygments        = config['pygments']
       self.permalink_style = config['permalink'].to_sym
       self.exclude         = config['exclude'] || []
+      self.future          = config['future']
 
       self.reset
       self.setup
     end
 
     def reset
+      self.time            = if self.config['time']
+                               Time.parse(self.config['time'].to_s)
+                             else
+                               Time.now
+                             end
       self.layouts         = {}
       self.posts           = []
       self.pages           = []
@@ -32,70 +42,38 @@ module Jekyll
     end
 
     def setup
-      # Check to see if LSI is enabled.
       require 'classifier' if self.lsi
 
-      # Set the Markdown interpreter (and Maruku self.config, if necessary)
-      case self.config['markdown']
-        when 'rdiscount'
-          begin
-            require 'rdiscount'
+      # If safe mode is off, load in any ruby files under the plugins
+      # directory.
+      unless self.safe
+        Dir[File.join(self.plugins, "**/*.rb")].each do |f|
+          require f
+        end
+      end
 
-            def markdown(content)
-              RDiscount.new(content).to_html
-            end
+      self.converters = Jekyll::Converter.subclasses.select do |c|
+        !self.safe || c.safe
+      end.map do |c|
+        c.new(self.config)
+      end
 
-          rescue LoadError
-            puts 'You must have the rdiscount gem installed first'
-          end
-        when 'maruku'
-          begin
-            require 'maruku'
-
-            def markdown(content)
-              Maruku.new(content).to_html
-            end
-
-            if self.config['maruku']['use_divs']
-              require 'maruku/ext/div'
-              puts 'Maruku: Using extended syntax for div elements.'
-            end
-
-            if self.config['maruku']['use_tex']
-              require 'maruku/ext/math'
-              puts "Maruku: Using LaTeX extension. Images in `#{self.config['maruku']['png_dir']}`."
-
-              # Switch off MathML output
-              MaRuKu::Globals[:html_math_output_mathml] = false
-              MaRuKu::Globals[:html_math_engine] = 'none'
-
-              # Turn on math to PNG support with blahtex
-              # Resulting PNGs stored in `images/latex`
-              MaRuKu::Globals[:html_math_output_png] = true
-              MaRuKu::Globals[:html_png_engine] =  self.config['maruku']['png_engine']
-              MaRuKu::Globals[:html_png_dir] = self.config['maruku']['png_dir']
-              MaRuKu::Globals[:html_png_url] = self.config['maruku']['png_url']
-            end
-          rescue LoadError
-            puts "The maruku gem is required for markdown support!"
-          end
-        else
-          raise "Invalid Markdown processor: '#{self.config['markdown']}' -- did you mean 'maruku' or 'rdiscount'?"
+      self.generators = Jekyll::Generator.subclasses.select do |c|
+        !self.safe || c.safe
+      end.map do |c|
+        c.new(self.config)
       end
     end
 
-    def textile(content)
-      RedCloth.new(content).to_html
-    end
-
     # Do the actual work of processing the site and generating the
-    # real deal.  Now has 4 phases; reset, read, render, write.  This allows
+    # real deal.  5 phases; reset, read, generate, render, write.  This allows
     # rendering to have full site payload available.
     #
     # Returns nothing
     def process
       self.reset
       self.read
+      self.generate
       self.render
       self.write
     end
@@ -135,7 +113,7 @@ module Jekyll
         if Post.valid?(f)
           post = Post.new(self, self.source, dir, f)
 
-          if post.published
+          if post.published && (self.future || post.date <= self.time)
             self.posts << post
             post.categories.each { |c| self.categories[c] << post }
             post.tags.each { |c| self.tags[c] << post }
@@ -146,17 +124,19 @@ module Jekyll
       self.posts.sort!
     end
 
+    def generate
+      self.generators.each do |generator|
+        generator.generate(self)
+      end
+    end
+
     def render
       self.posts.each do |post|
         post.render(self.layouts, site_payload)
       end
 
-      self.pages.dup.each do |page|
-        if Pager.pagination_enabled?(self.config, page.name)
-          paginate(page)
-        else
-          page.render(self.layouts, site_payload)
-        end
+      self.pages.each do |page|
+        page.render(self.layouts, site_payload)
       end
 
       self.categories.values.map { |ps| ps.sort! { |a, b| b <=> a} }
@@ -180,7 +160,7 @@ module Jekyll
       end
     end
 
-    # Reads the directories and finds posts, pages and static files that will 
+    # Reads the directories and finds posts, pages and static files that will
     # become part of the valid site according to the rules in +filter_entries+.
     #   The +dir+ String is a relative path used to call this method
     #            recursively as it descends through directories
@@ -240,11 +220,14 @@ module Jekyll
     #
     # Returns {"site" => {"time" => <Time>,
     #                     "posts" => [<Post>],
+    #                     "pages" => [<Page>],
     #                     "categories" => [<Post>]}
     def site_payload
       {"site" => self.config.merge({
-          "time"       => Time.now,
+          "time"       => self.time,
           "posts"      => self.posts.sort { |a,b| b <=> a },
+          "pages"      => self.pages,
+          "html_pages" => self.pages.reject { |page| !page.html? },
           "categories" => post_attr_hash('categories'),
 		  "_tags"	   => post_attr_arry('tags'),
           "tags"       => post_attr_hash('tags')})}
@@ -262,32 +245,5 @@ module Jekyll
       end
     end
 
-    # Paginates the blog's posts. Renders the index.html file into paginated
-    # directories, ie: page2/index.html, page3/index.html, etc and adds more
-    # site-wide data.
-    #   +page+ is the index.html Page that requires pagination
-    #
-    # {"paginator" => { "page" => <Number>,
-    #                   "per_page" => <Number>,
-    #                   "posts" => [<Post>],
-    #                   "total_posts" => <Number>,
-    #                   "total_pages" => <Number>,
-    #                   "previous_page" => <Number>,
-    #                   "next_page" => <Number> }}
-    def paginate(page)
-      all_posts = site_payload['site']['posts']
-      pages = Pager.calculate_pages(all_posts, self.config['paginate'].to_i)
-      (1..pages).each do |num_page|
-        pager = Pager.new(self.config, num_page, all_posts, pages)
-        if num_page > 1
-          newpage = Page.new(self, self.source, page.dir, page.name)
-          newpage.render(self.layouts, site_payload.merge({'paginator' => pager.to_hash}))
-          newpage.dir = File.join(page.dir, "page#{num_page}")
-          self.pages << newpage
-        else
-          page.render(self.layouts, site_payload.merge({'paginator' => pager.to_hash}))
-        end
-      end
-    end
   end
 end

@@ -3,7 +3,7 @@ module Jekyll
   class Page
     include Convertible
 
-    attr_accessor :site
+    attr_accessor :site, :pager
     attr_accessor :name, :ext, :basename, :dir
     attr_accessor :data, :content, :output
 
@@ -43,10 +43,10 @@ module Jekyll
     end
 
     def template
-      if self.site.permalink_style == :pretty && !index?
-        "/:name/"
+      if self.site.permalink_style == :pretty && !index? && html?
+        "/:basename/"
       else
-        "/:name.html"
+        "/:basename:output_ext"
       end
     end
 
@@ -57,7 +57,12 @@ module Jekyll
     def url
       return permalink if permalink
 
-      @url ||= (ext == '.html') ? template.gsub(':name', basename) : "/#{name}"
+      @url ||= {
+        "basename"   => self.basename,
+        "output_ext" => self.output_ext,
+      }.inject(template) { |result, token|
+        result.gsub(/:#{token.first}/, token.last)
+      }.gsub(/\/\//, "/")
     end
 
     # Extract information from the page filename
@@ -75,8 +80,18 @@ module Jekyll
     #
     # Returns nothing
     def render(layouts, site_payload)
-      payload = {"page" => self.data}.deep_merge(site_payload)
+      payload = {
+        "page" => self.to_liquid,
+        'paginator' => pager.to_liquid
+      }.deep_merge(site_payload)
+
       do_layout(payload, layouts)
+    end
+
+    def to_liquid
+      self.data.deep_merge({
+        "url"        => File.join(@dir, self.url),
+        "content"    => self.content })
     end
 
     # Write the generated page file to the destination directory.
@@ -91,7 +106,7 @@ module Jekyll
 
       # The url needs to be unescaped in order to preserve the correct filename
       path = File.join(dest, CGI.unescape(self.url))
-      if self.ext == '.html' && self.url[/\.html$/].nil?
+      if self.url =~ /\/$/
         FileUtils.mkdir_p(path)
         path = File.join(path, "index.html")
       end
@@ -105,11 +120,13 @@ module Jekyll
       "#<Jekyll:Page @name=#{self.name.inspect}>"
     end
 
-    private
+    def html?
+      output_ext == '.html'
+    end
 
-      def index?
-        basename == 'index'
-      end
+    def index?
+      basename == 'index'
+    end
 
   end
 
